@@ -6,14 +6,30 @@ Official [Homebrew](https://brew.sh) tap for [swamp](https://github.com/swamp-cl
 
 ```bash
 brew tap swamp-club/tap
+brew trust swamp-club/tap
 brew install swamp
 ```
+
+Homebrew 6 and later require third-party taps to be trusted before Homebrew will
+load any formula from them. If you skip `brew trust`, the install fails with:
+
+```
+Error: Refusing to load formula swamp-club/tap/swamp from untrusted tap swamp-club/tap.
+```
+
+Homebrew 5 and earlier have no `brew trust` command; on those versions, skip that
+step and the two remaining commands work as-is.
 
 ## Upgrade
 
 ```bash
 brew upgrade swamp
 ```
+
+Trusting the tap also matters here. When `brew upgrade` is run with no arguments,
+it enumerates every installed formula and skips untrusted taps with a warning
+rather than failing, so an untrusted swamp is quietly left behind at its old
+version. Running `brew trust swamp-club/tap` once is what keeps upgrades flowing.
 
 ## How it works
 
