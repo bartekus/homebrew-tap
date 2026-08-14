@@ -1,7 +1,8 @@
 class Swamp < Formula
   desc "AI Native Automation CLI"
-  homepage "https://swamp.club"
+  homepage "https://swamp-club.com"
   version "20260817.010424.0-sha.21133ea1"
+  license "AGPL-3.0-only"
 
   on_macos do
     on_intel do
@@ -30,6 +31,6 @@ class Swamp < Formula
   end
 
   test do
-    assert_match "swamp", shell_output("#{bin}/swamp --version")
+    assert_match version.to_s, shell_output("#{bin}/swamp --version")
   end
 end
