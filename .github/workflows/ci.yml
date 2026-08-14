@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Daily, to catch artifacts disappearing from the host after a release lands.
+    - cron: "17 6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Releases land several times a day; only the newest commit needs to be green.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  formula:
+    name: Style and audit
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Install checkout as a tap
+        run: |
+          TAP="$(brew --repository)/Library/Taps/swamp-club/homebrew-tap"
+          mkdir -p "$TAP"
+          cp -R "$GITHUB_WORKSPACE"/. "$TAP"/
+
+      - name: Trust the tap
+        run: |
+          # Homebrew 6+ refuses to load formulae from untrusted third-party taps.
+          brew trust swamp-club/tap \
+            || echo "brew trust unavailable on this Homebrew version; continuing"
+
+      - name: brew style
+        run: brew style swamp-club/tap
+
+      - name: brew audit
+        run: brew audit --strict --online swamp-club/tap/swamp
+
+  checksums:
+    name: Verify published checksums
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check every platform's sha256 against the live artifact
+        run: |
+          set -euo pipefail
+
+          VERSION="$(sed -n 's/^[[:space:]]*version "\(.*\)"$/\1/p' Formula/swamp.rb)"
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not parse version from Formula/swamp.rb"
+            exit 1
+          fi
+          echo "version: $VERSION"
+
+          mapfile -t URLS < <(grep -o 'https://artifacts[^"]*' Formula/swamp.rb)
+          mapfile -t SHAS < <(grep -oE '\b[0-9a-f]{64}\b' Formula/swamp.rb)
+
+          if [ "${#URLS[@]}" -ne 4 ] || [ "${#SHAS[@]}" -ne 4 ]; then
+            echo "::error::expected 4 url/sha256 pairs, got ${#URLS[@]} urls and ${#SHAS[@]} checksums"
+            exit 1
+          fi
+
+          failed=0
+          for i in "${!URLS[@]}"; do
+            url="${URLS[$i]//\#\{version\}/$VERSION}"
+            want="${SHAS[$i]}"
+
+            # Stream the artifact through sha256sum so nothing hits disk.
+            got="$(curl -fsSL --retry 3 --retry-delay 5 "$url" | sha256sum | cut -d' ' -f1)"
+
+            if [ "$got" = "$want" ]; then
+              echo "OK        $url"
+            else
+              echo "::error::checksum mismatch for $url (expected $want, got $got)"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+  install:
+    name: Install and test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # One runner per platform the formula actually ships a binary for.
+        os: [macos-latest, macos-15-intel, ubuntu-latest, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Install checkout as a tap
+        run: |
+          TAP="$(brew --repository)/Library/Taps/swamp-club/homebrew-tap"
+          mkdir -p "$TAP"
+          cp -R "$GITHUB_WORKSPACE"/. "$TAP"/
+
+      - name: Trust the tap
+        run: |
+          brew trust swamp-club/tap \
+            || echo "brew trust unavailable on this Homebrew version; continuing"
+
+      - name: brew install
+        run: brew install swamp-club/tap/swamp
+
+      - name: brew test
+        run: brew test swamp-club/tap/swamp
+
+      - name: Binary runs and reports the packaged version
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^[[:space:]]*version "\(.*\)"$/\1/p' Formula/swamp.rb)"
+          swamp --version
+          swamp --version | grep -qF "$VERSION"
